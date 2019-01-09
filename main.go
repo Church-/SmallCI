@@ -3,64 +3,53 @@ package main
 import (
 	"fmt"
 
-	"io/ioutil"
-
+//	"io/ioutil"
+	"encoding/gob"
 	"log"
 
+	"net"
 	"net/http"
 
-	"os"
-	"os/exec"
+//	"os"
+//	"os/exec"
 	
 	"github.com/google/go-github/v21/github"
 
 	"gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 
-	"gopkg.in/yaml.v2"
+//	"gopkg.in/yaml.v2"
 )
 
 const (
 	path = "/webhooks"
 )
 
-type Pipeline struct {
-	Kind  string
-	Steps []struct {
-		Name     string
-		Commands []string
-	}
+
+type RepoInfo struct {
+	Name string
+	Commit string
 }
 
-func parseYamlPipeLine() *Pipeline {
-	var p *Pipeline
-	file, err := ioutil.ReadFile("./config.yaml")
-	if err != nil {
-		log.Print(err)
-	}
-	if err := yaml.Unmarshal(file, p); err != nil {
-		log.Print(err)
-	}
-	return p
+type JobResult struct {
+	Status int
+	Logs string
 }
 
-func runPipeline(p *Pipeline) {
-	if p.Kind != "pipeline" {
-		log.Print("Not a pipeline.")
-	}
-	for _, step := range p.Steps {
-		fmt.Printf("Step: %s has started", step.Name)
-		for _, command := range step.Commands {
-			cmd := exec.Command(command)
-			fmt.Printf("Command: %s is running.", command)
-			if err := cmd.Run(); err != nil {
-				log.Printf("Command finished with error: %v", err)
-			}
-		}
-	}
+type MachineConfig {
+	IP string
+	Mem float64 
+	CPU float64
 }
 
-func handleWebhook(w http.ResponseWriter, r *http.Request) {
+func encodeBuffer(re RepoInfo) GobEncoder {
+	var b bytes.Buffer
+	gobEncoded := gob.NewEncoder(&b)
+	gobEncoded.Encode(re)
+	return gobEncoded
+}
+
+func handleWebhook(w http.ResponseWriter, r *http.Request, buildQueue chan, runningBuildQueue chan) {
 	payload, err := github.ValidatePayload(r, []byte("Secret1"))
 	//	payload, err := ioutil.ReadAll(r.Body)
 
@@ -80,33 +69,35 @@ func handleWebhook(w http.ResponseWriter, r *http.Request) {
 	switch e := event.(type) {
 
 	case *github.PushEvent:
-		path := "/tmp/" + *e.Repo.Name
-		if err := os.Chdir(path); err != nil {
-			os.Mkdir(path, 0777)
-			_, err := git.PlainClone(path, false, &git.CloneOptions{
-				URL: *e.Repo.GitURL,
-			})
-			if err != nil {
-				log.Print(err)
-			}
-		} else {
-			os.Chdir(path)
-			req, _ := git.PlainOpen(path)
-			w, _ := req.Worktree()
-			commit := plumbing.NewHash(*e.HeadCommit.ID)
-			w.Reset(&git.ResetOptions{
-				Mode:   git.HardReset,
-				Commit: commit})
-		}
-		os.Chdir(path)
-		go runPipeline(parseYamlPipeLine())
-
+		var repo RepoInfo{}
+		repo.Name := *e.Repo.Name
+		repo.Id := *e.Head
+		repoCopy
+		buildQueue <- repo
+		runningBuildQueue <- repoCopy
+		
 	default:
 		log.Print("Event is not among the list being acted upon.")
 	}
 }
 
 func main() {
+	buildQueue := make(chan RepoInfo 300)
+	runningBuildQueue := make(chan RepoInfo 300)
+	
 	http.HandleFunc(path, handleWebhook)
 	http.ListenAndServe(":3000", nil)
+	server, err := net.Listen("tcp",":4545")
+	conn, err := server.Accept()
+	for {
+		buffer,err := encodeBuffer(<- buildQueue)
+		if _, err := conn.Write(buffer.Bytes()); err != nil {
+			log.Print(err)
+		}
+		tmpBuff := make(byte[] 1000)
+		if _,err := conn.Read(tmpBuff); err != nil {
+			log.Print(err)
+		}
+		
+	} 
 }
