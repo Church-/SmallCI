@@ -35,7 +35,6 @@ type JobResult struct {
 }
 
 type Worker struct {
-	IP string
 	Mem float64 
 	CPU float64
 	connMu sync.Mutex; 
@@ -118,6 +117,7 @@ func main() {
 		if conn, err := server.Accept(); err != nil {
 			log.Print(err)
 		}
+		
 		go handleTcpConnection(conn)
 	} 
 }

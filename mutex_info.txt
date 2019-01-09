@@ -1,0 +1,40 @@
+2019-01-09 00:35:29	aleph-	So Tv` So I feel like you might know, I have a standard TCP server like in the listener example on the net package page. Spin off a goroutine each time I get a connection. What would be the best way to associate each connection with a piece of info, say a name or some sort of identifier. Been driving me barmy.
+2019-01-09 00:35:50	Tv`	aleph-: pass the goroutine an argument with that info
+2019-01-09 00:36:14	Tv`	(or extract it from whatever at the start of the per-connection goroutine)
+2019-01-09 00:38:15	aleph-	Hmm to extrapolate on what I mean, trying to write a basic job scheduler so I can farm jobs out to the connection to a machine with the resource usage ratio. The only trouble I'm having is associating an identifier with a goroutine so I know which to pass data to. Haven't found a single example so far of associating context to a long living goroutine.
+2019-01-09 00:38:25	aleph-	Curious if you might know of an example to wrap my head around.
+2019-01-09 00:38:50	Tv`	you're thinking of it weird
+2019-01-09 00:38:57	aleph-	Yeahhhh
+2019-01-09 00:39:10	aleph-	I know there's probably a much simpler way to conceptualize it
+2019-01-09 00:39:17	aleph-	Just not clicking for some reason.
+2019-01-09 00:39:20	Tv`	you have workers, right. you are distributing jobs to workers.
+2019-01-09 00:39:26	Tv`	you have some data structure with all your workers
+2019-01-09 00:39:26	aleph-	Aye
+2019-01-09 00:39:37	Tv`	type Worker struct { ...; conn net.Conn }
+2019-01-09 00:39:55	Tv`	type Worker struct { ...; connMu sync.Mutex; conn net.Conn }
+2019-01-09 00:40:16	aleph-	Huh...
+2019-01-09 00:40:22	aleph-	That almost makes sense.
+2019-01-09 00:40:34	Tv`	func (w *Worker) SendJob(j *Job) error { w.connMu.Lock(); defer w.connMu.Unlock(); _, err := w.conn.Write(...); return err }
+2019-01-09 00:40:35	aleph-	Oh
+2019-01-09 00:40:41	aleph-	Okay yeah
+2019-01-09 00:40:46	aleph-	I'm a fucking idjit
+2019-01-09 00:40:51	aleph-	I could do that.
+2019-01-09 00:40:55	Tv`	if you need a response from the worker that it accepts a job, you need more
+2019-01-09 00:41:10	Tv`	but the basic design is, reader sits in a goroutine with exclusive access to read side of conn
+2019-01-09 00:41:14	Tv`	writers want to hold a mutex
+2019-01-09 00:41:29	aleph-	Oh boy Mutexs. This takes me back to Uni
+2019-01-09 00:41:34	Tv`	if Send needs an ack from the reader, then you need state with pending requests that reader finds things to respond to, in
+2019-01-09 00:41:56	aleph-	Alrighty, gonna spit this into a damn buffer while I mull it over
+2019-01-09 00:42:00	aleph-	Thanks a bundle Tv
+2019-01-09 00:42:12	Tv`	e.g. if messages have ids, then it's can be just a map[id]chan error or such, protected by a mutex again
+2019-01-09 00:42:21	aleph-	Aye
+2019-01-09 00:42:52	Tv`	then again, these days i'd recommend just riding on top of http
+2019-01-09 00:43:02	aleph-	Oh, how come?
+2019-01-09 00:43:08	Tv`	takes care of a lot of the little details for you
+2019-01-09 00:43:26	Tv`	like matching responses to request
+2019-01-09 00:43:36	aleph-	Hmm, gotcha. S'its an idea
+2019-01-09 00:43:40	aleph-	Secondary question.
+2019-01-09 00:44:01	aleph-	So I have say... a chan: c := make(chan MachineInfo 10)
+2019-01-09 00:44:16	aleph-	Or hmm....
+2019-01-09 00:44:25	aleph-	No I shouldn't use a chan for that.
+2019-01-09 00:44:30	aleph-	Nevermind, bad idea.
