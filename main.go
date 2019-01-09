@@ -3,22 +3,19 @@ package main
 import (
 	"fmt"
 
-//	"io/ioutil"
 	"encoding/gob"
 	"log"
-
+	"sync"
+	
 	"net"
 	"net/http"
 
-//	"os"
-//	"os/exec"
 	
 	"github.com/google/go-github/v21/github"
 
 	"gopkg.in/src-d/go-git.v4"
 	"gopkg.in/src-d/go-git.v4/plumbing"
 
-//	"gopkg.in/yaml.v2"
 )
 
 const (
@@ -26,7 +23,7 @@ const (
 )
 
 
-type RepoInfo struct {
+type Job struct {
 	Name string
 	Commit string
 }
@@ -36,22 +33,31 @@ type JobResult struct {
 	Logs string
 }
 
-type MachineConfig {
+type Worker struct {
 	IP string
 	Mem float64 
 	CPU float64
+	connMu sync.Mutex; 
+	conn net.Conn 
 }
 
-func encodeBuffer(re RepoInfo) GobEncoder {
+func (w *Worker) SendJob(j *Job) error { 
+	w.connMu.Lock()
+	defer w.connMu.Unlock()
+	_, err := w.conn.Write()
+	return err 
+}
+
+
+func encodeBuffer(job Job) GobEncoder {
 	var b bytes.Buffer
 	gobEncoded := gob.NewEncoder(&b)
-	gobEncoded.Encode(re)
+	gobEncoded.Encode(job)
 	return gobEncoded
 }
 
 func handleWebhook(w http.ResponseWriter, r *http.Request, buildQueue chan, runningBuildQueue chan) {
 	payload, err := github.ValidatePayload(r, []byte("Secret1"))
-	//	payload, err := ioutil.ReadAll(r.Body)
 
 	if err != nil {
 		log.Printf("Error validating payload: err=%v", err)
@@ -69,11 +75,11 @@ func handleWebhook(w http.ResponseWriter, r *http.Request, buildQueue chan, runn
 	switch e := event.(type) {
 
 	case *github.PushEvent:
-		var repo RepoInfo{}
-		repo.Name := *e.Repo.Name
-		repo.Id := *e.Head
-		repoCopy
-		buildQueue <- repo
+		var job Job{}
+		job.Name := *e.Repo.Name
+		job.Id := *e.Head
+		jobCopy := job
+		buildQueue <- job
 		runningBuildQueue <- repoCopy
 		
 	default:
@@ -81,23 +87,35 @@ func handleWebhook(w http.ResponseWriter, r *http.Request, buildQueue chan, runn
 	}
 }
 
+func handleTcpConnection(c net.Conn) {
+	var worker Worker{}
+	
+	buffer, err := encodeBuffer(<- buildQueue)
+	if _, err := conn.Write(buffer.Bytes()); err != nil {
+		log.Print(err)
+	}
+	tmpBuff := make(byte[] 1000)
+	if _, err := conn.Read(tmpBuff); err != nil {
+		log.Print(err)
+	}
+	
+}
+
 func main() {
-	buildQueue := make(chan RepoInfo 300)
-	runningBuildQueue := make(chan RepoInfo 300)
+	workerGroup := make(chan *Worker 30)
+	buildQueue := make(chan Job 300)
+	runningBuildQueue := make(chan Job 300)
+	finishedQueue := make(chan JobResult 300)
 	
 	http.HandleFunc(path, handleWebhook)
 	http.ListenAndServe(":3000", nil)
+	
 	server, err := net.Listen("tcp",":4545")
-	conn, err := server.Accept()
+
 	for {
-		buffer,err := encodeBuffer(<- buildQueue)
-		if _, err := conn.Write(buffer.Bytes()); err != nil {
+		if conn, err := server.Accept(); err != nil {
 			log.Print(err)
 		}
-		tmpBuff := make(byte[] 1000)
-		if _,err := conn.Read(tmpBuff); err != nil {
-			log.Print(err)
-		}
-		
+		go handleTcpConnection(conn)
 	} 
 }
