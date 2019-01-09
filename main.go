@@ -25,6 +25,7 @@ const (
 
 type Job struct {
 	Name string
+	URL string
 	Commit string
 }
 
@@ -78,9 +79,10 @@ func handleWebhook(w http.ResponseWriter, r *http.Request, buildQueue chan, runn
 		var job Job{}
 		job.Name := *e.Repo.Name
 		job.Id := *e.Head
+		job.URL := *e.Repo.GitURL
 		jobCopy := job
 		buildQueue <- job
-		runningBuildQueue <- repoCopy
+		runningBuildQueue <- jobCopy
 		
 	default:
 		log.Print("Event is not among the list being acted upon.")
